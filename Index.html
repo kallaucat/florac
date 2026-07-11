@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Rosa 🌹</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: black;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    background: black;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="lienzo" width="800" height="800"></canvas>
+
+<script>
+async function dibujarDesdeJSON(rutaJson) {
+  const canvas = document.getElementById("lienzo");
+  const ctx = canvas.getContext("2d");
+
+  // Cargar regiones
+  const respuesta = await fetch(rutaJson);
+  const regions = await respuesta.json();
+
+  // Calcular límites para centrar el dibujo (igual que en Python)
+  const allPoints = regions.flatMap(r => r.contour);
+  const minX = Math.min(...allPoints.map(p => p[0]));
+  const maxX = Math.max(...allPoints.map(p => p[0]));
+  const minY = Math.min(...allPoints.map(p => p[1]));
+  const maxY = Math.max(...allPoints.map(p => p[1]));
+
+  const width = maxX - minX;
+  const height = maxY - minY;
+  const scale = Math.min(600 / width, 600 / height);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+
+  const originX = canvas.width / 2;
+  const originY = canvas.height / 2;
+
+  // Convierte un punto del JSON a coordenadas de canvas
+  function transformar(punto) {
+    const x = (punto[0] - centerX) * scale;
+    const y = (centerY - punto[1]) * scale; // eje Y invertido, como en turtle
+    return [originX + x, originY + y];
+  }
+
+  // Dibuja un contorno progresivamente, punto a punto, con relleno al final
+  function dibujarRegionAnimada(puntosTransformados, color, duracionMs) {
+    return new Promise(resolve => {
+      // Longitud de cada segmento, para que la velocidad sea uniforme
+      const segmentos = [];
+      let longitudTotal = 0;
+      for (let i = 0; i < puntosTransformados.length - 1; i++) {
+        const [x1, y1] = puntosTransformados[i];
+        const [x2, y2] = puntosTransformados[i + 1];
+        const d = Math.hypot(x2 - x1, y2 - y1);
+        segmentos.push(d);
+        longitudTotal += d;
+      }
+
+      const inicio = performance.now();
+
+      function frame(ahora) {
+        const t = Math.min((ahora - inicio) / duracionMs, 1);
+        const longitudObjetivo = t * longitudTotal;
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(puntosTransformados[0][0], puntosTransformados[0][1]);
+
+        let recorrido = 0;
+        for (let i = 0; i < segmentos.length; i++) {
+          const d = segmentos[i];
+          if (recorrido + d <= longitudObjetivo) {
+            ctx.lineTo(puntosTransformados[i + 1][0], puntosTransformados[i + 1][1]);
+            recorrido += d;
+          } else {
+            const restante = longitudObjetivo - recorrido;
+            const frac = d === 0 ? 0 : restante / d;
+            const [x1, y1] = puntosTransformados[i];
+            const [x2, y2] = puntosTransformados[i + 1];
+            ctx.lineTo(x1 + (x2 - x1) * frac, y1 + (y2 - y1) * frac);
+            break;
+          }
+        }
+        ctx.stroke();
+
+        if (t < 1) {
+          requestAnimationFrame(frame);
+        } else {
+          // Contorno completo: rellenar la forma
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(puntosTransformados[0][0], puntosTransformados[0][1]);
+          for (const [x, y] of puntosTransformados.slice(1)) {
+            ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.fill();
+          resolve();
+        }
+      }
+
+      requestAnimationFrame(frame);
+    });
+  }
+
+  // Dibujar cada región en orden, una después de otra
+  for (const region of regions) {
+    const [r, g, b] = region.color;
+    const color = `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+
+    const puntos = region.contour.map(transformar);
+    // Cerrar el contorno para que la animación también trace el último segmento
+    puntos.push(puntos[0]);
+
+    await dibujarRegionAnimada(puntos, color, 500);
+  }
+}
+
+dibujarDesdeJSON("resources/rosas.json");
+</script>
+
+</body>
+</html>
